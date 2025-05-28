@@ -38,7 +38,11 @@ class _MethodCallbackProtocol(Protocol):
 
 class _Method:
     def __init__(
-        self, fn: _MethodCallbackProtocol, name: str, disabled: bool = False
+        self,
+        fn: _MethodCallbackProtocol,
+        name: str,
+        disabled: bool = False,
+        caller_arg: str | None = None,
     ) -> None:
         in_signature = ""
         out_signature = ""
@@ -49,6 +53,9 @@ class _Method:
         for i, param in enumerate(inspection.parameters.values()):
             if i == 0:
                 # first is self
+                continue
+            if param.name == caller_arg:
+                # this is an internal argument and is not exposed to D-Bus
                 continue
             annotation = parse_annotation(param.annotation)
             if not annotation:
@@ -72,9 +79,12 @@ class _Method:
         self.out_signature = out_signature
         self.in_signature_tree = get_signature_tree(in_signature)
         self.out_signature_tree = get_signature_tree(out_signature)
+        self.caller_argument = caller_arg
 
 
-def method(name: str | None = None, disabled: bool = False) -> Callable:
+def method(
+    name: str | None = None, disabled: bool = False, inject_caller: bool | str = False
+) -> Callable:
     """A decorator to mark a class method of a :class:`ServiceInterface` to be a DBus service method.
 
     The parameters and return value must each be annotated with a signature
@@ -94,6 +104,8 @@ def method(name: str | None = None, disabled: bool = False) -> Callable:
     :type name: str
     :param disabled: If set to true, the method will not be visible to clients.
     :type disabled: bool
+    :param inject_caller: If set to true, will inject the caller bus name into the `caller` kwarg. If set to a string, will instead use that value as the kwarg.
+    :type inject_caller: str | bool
 
     :example:
 
@@ -111,6 +123,14 @@ def method(name: str | None = None, disabled: bool = False) -> Callable:
         raise TypeError("name must be a string")
     if type(disabled) is not bool:
         raise TypeError("disabled must be a bool")
+    if type(inject_caller) is not bool or type(caller_arg) is not str:
+        raise TypeError("inject_caller must be a string or bool")
+
+    caller_arg = None
+    if inject_caller is True:
+        caller_arg = "caller"
+    elif type(inject_caller) is str:
+        caller_arg = inject_caller
 
     def decorator(fn: Callable) -> Callable:
         @wraps(fn)
@@ -118,7 +138,9 @@ def method(name: str | None = None, disabled: bool = False) -> Callable:
             fn(*args, **kwargs)
 
         fn_name = name if name else fn.__name__
-        wrapped.__dict__["__DBUS_METHOD"] = _Method(fn, fn_name, disabled=disabled)
+        wrapped.__dict__["__DBUS_METHOD"] = _Method(
+            fn, fn_name, disabled=disabled, caller_arg=caller_arg
+        )
 
         return wrapped
 
