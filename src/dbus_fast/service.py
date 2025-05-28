@@ -71,6 +71,7 @@ class _Method:
             for type_ in get_signature_tree(out_signature).types:
                 out_args.append(intr.Arg(type_, intr.ArgDirection.OUT))
 
+        self.caller_argument = caller_arg
         self.name = name
         self.fn = fn
         self.disabled = disabled
@@ -79,7 +80,6 @@ class _Method:
         self.out_signature = out_signature
         self.in_signature_tree = get_signature_tree(in_signature)
         self.out_signature_tree = get_signature_tree(out_signature)
-        self.caller_argument = caller_arg
 
 
 def method(
@@ -123,7 +123,7 @@ def method(
         raise TypeError("name must be a string")
     if type(disabled) is not bool:
         raise TypeError("disabled must be a bool")
-    if type(inject_caller) is not bool or type(caller_arg) is not str:
+    if type(inject_caller) is not bool and type(inject_caller) is not str:
         raise TypeError("inject_caller must be a string or bool")
 
     caller_arg = None

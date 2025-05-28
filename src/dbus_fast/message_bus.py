@@ -878,7 +878,10 @@ class BaseMessageBus:
     ) -> None:
         """This is the callback that will be called when a method call is."""
         args = ServiceInterface._c_msg_body_to_args(msg) if msg.unix_fds else msg.body
-        result = method.fn(interface, *args)
+        kwargs = {}
+        if method.caller_argument is not None:
+            kwargs = {method.caller_argument: msg.sender}
+        result = method.fn(interface, *args, **kwargs)
         if send_reply is BLOCK_UNEXPECTED_REPLY or _expects_reply(msg) is False:
             return
         body_fds = ServiceInterface._c_fn_result_to_body(

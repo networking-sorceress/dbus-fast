@@ -60,6 +60,16 @@ class ExampleInterface(ServiceInterface):
         assert type(self) is ExampleInterface
         raise DBusError("test.error", "an error occurred")
 
+    @method(inject_caller=True)
+    def echo_caller(self, caller: str | None = None) -> "s":
+        assert type(self) is ExampleInterface
+        return caller
+
+    @method(inject_caller="source")
+    def echo_source(self, source: str | None = None) -> "s":
+        assert type(self) is ExampleInterface
+        return source
+
 
 class AsyncInterface(ServiceInterface):
     def __init__(self, name):
@@ -107,6 +117,16 @@ class AsyncInterface(ServiceInterface):
     def throws_dbus_error(self):
         assert type(self) is AsyncInterface
         raise DBusError("test.error", "an error occurred")
+
+    @method(inject_caller=True)
+    async def echo_caller(self, caller: str | None = None) -> "s":
+        assert type(self) is AsyncInterface
+        return caller
+
+    @method(inject_caller="source")
+    async def echo_source(self, source: str | None = None) -> "s":
+        assert type(self) is AsyncInterface
+        return source
 
 
 @pytest.mark.parametrize("interface_class", [ExampleInterface, AsyncInterface])
@@ -215,6 +235,14 @@ async def test_methods(interface_class):
     assert reply.body == [
         'test.interface.does_not_exist with signature "" could not be found'
     ]
+
+    reply = await call("echo_caller")
+    assert reply.message_type == MessageType.METHOD_RETURN, reply.body[0]
+    assert reply.body[0] == bus2.unique_name
+
+    reply = await call("echo_source")
+    assert reply.message_type == MessageType.METHOD_RETURN, reply.body[0]
+    assert reply.body[0] == bus2.unique_name
 
     bus1.disconnect()
     bus2.disconnect()
