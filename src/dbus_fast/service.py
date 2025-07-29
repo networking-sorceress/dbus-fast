@@ -4,7 +4,8 @@ import asyncio
 import copy
 import inspect
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
+from warnings import warn
 
 from . import introspection as intr
 from ._private.util import (
@@ -13,7 +14,7 @@ from ._private.util import (
     replace_idx_with_fds,
     signature_contains_type,
 )
-from .constants import PropertyAccess
+from .constants import MessageFlag, PropertyAccess
 from .errors import SignalDisabledError
 from .message import Message
 from .send_reply import SendReply
@@ -33,10 +34,23 @@ HandlerType = Callable[[Message, SendReply], None]
 
 
 class _MethodCallbackProtocol(Protocol):
-    def __call__(self, interface: ServiceInterface, *args: Any) -> Any: ...
+    def __call__(
+        self, interface: ServiceInterface, *args: Any, **kwargs: Any
+    ) -> Any: ...
 
 
 class _Method:
+    SENDER_PARAM = "sender"
+    FLAGS_PARAM = "message_flags"
+
+    RESERVED_PARAMS = {
+        SENDER_PARAM: (str, Optional[str]),
+        FLAGS_PARAM: (
+            MessageFlag,
+            Optional[MessageFlag],
+        ),
+    }
+
     def __init__(
         self, fn: _MethodCallbackProtocol, name: str, disabled: bool = False
     ) -> None:
@@ -45,10 +59,44 @@ class _Method:
 
         inspection = inspect.signature(fn)
 
+        self.reserved_kwargs = set[str]()
+
         in_args: list[intr.Arg] = []
         for i, param in enumerate(inspection.parameters.values()):
             if i == 0:
                 # first is self
+                continue
+            if (
+                param.kind == inspect.Parameter.KEYWORD_ONLY
+                and param.name in self.RESERVED_PARAMS
+            ):
+                # This is a keyword-only parameter, which D-Bus does not support, and it's one of our "reserved" kwargs for metadata injection.
+                # Validate the type, note that it exists, and if it is required, issue a warning that calling it locally will be annoying.
+                if param.default is inspect._empty:
+                    warn(
+                        f"Internally-handled keyword argument {param.name} does not have a default value."
+                        " Calling this method from local Python code may be awkward as a result.",
+                        stacklevel=2,
+                    )
+                if (
+                    param.annotation is not None
+                    and param.annotation not in self.RESERVED_PARAMS[param.name]
+                ):
+                    # Ensure that the type is correct for the parameter, or is not present (since some people don't like writing type-safe Python code...)
+                    raise TypeError(
+                        f"keyword-only parameter {param.name} is reserved and must have type {self.RESERVED_PARAMS[param.name][0].__name__} if a type is specified."
+                    )
+                # Store which reserved parameter we have
+                self.reserved_kwargs.add(param.name)
+                continue
+            if param.kind == inspect.Parameter.KEYWORD_ONLY:
+                # Ensure that any other keyword-only parameters are optional (i.e., have a default value). We can't add them to the signature
+                # because, again, D-Bus does not support keyword arguments.
+                if param.default is inspect._empty:
+                    raise TypeError(
+                        "method cannot have required keyword-only arguments"
+                    )
+                # If it has a default, ignore it.
                 continue
             annotation = parse_annotation(param.annotation)
             if not annotation:
@@ -90,6 +138,13 @@ def method(name: str | None = None, disabled: bool = False) -> Callable:
     The decorated method may raise a :class:`DBusError <dbus_fast.DBusError>`
     to return an error to the client.
 
+    Keyword-only parameters (those which follow a `*`) may be added which are not
+    parsed by dbus-fast, except to ensure they have defaults (so calling from DBus
+    still works) or if they are one of the following parameters:
+    - `sender`: When called from DBus, will include the unique bus name of the method caller. Must have type :class:`str` if annotated.
+    - `flags`: When called from DBus, will include the flags set in the message header. Must have type :class:`MessageFlag` if annotated.
+    These parameters will be set if present, but are not required.
+
     :param name: The member name that DBus clients will use to call this method. Defaults to the name of the class method.
     :type name: str
     :param disabled: If set to true, the method will not be visible to clients.
@@ -106,6 +161,10 @@ def method(name: str | None = None, disabled: bool = False) -> Callable:
         @method()
         def echo_two(self, val1: 's', val2: 'u') -> 'su':
             return [val1, val2]
+
+        @method()
+        def whoami(self, *, sender: str) -> 's':
+            return sender
     """
     if name is not None and type(name) is not str:
         raise TypeError("name must be a string")

@@ -461,7 +461,10 @@ class MessageBus(BaseMessageBus):
         ) -> None:
             """A coroutine method handler."""
             args = msg_body_to_args(msg) if msg.unix_fds else msg.body
-            fut: asyncio.Future = asyncio.ensure_future(method.fn(interface, *args))
+            kwargs = self._get_kwargs_for_method_call(method, msg)
+            fut: asyncio.Future = asyncio.ensure_future(
+                method.fn(interface, *args, **kwargs)
+            )
             # Hold a strong reference to the future to ensure
             # it is not garbage collected before it is done.
             self._pending_futures.add(fut)

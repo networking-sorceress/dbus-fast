@@ -14,6 +14,7 @@ cdef class _Method:
     cdef public object introspection
     cdef public str in_signature
     cdef public str out_signature
+    cdef public set reserved_kwargs
     cdef public SignatureTree in_signature_tree
     cdef public SignatureTree out_signature_tree
 

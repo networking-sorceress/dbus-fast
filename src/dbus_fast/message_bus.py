@@ -869,6 +869,19 @@ class BaseMessageBus:
                 return_handler(msg, None)
             del self._method_return_handlers[msg.reply_serial]
 
+    def _get_kwargs_for_method_call(
+        self, method: _Method, msg: Message
+    ) -> dict[str, Any]:
+        """Generate the keyword arguments to provide to the method."""
+        result = dict[str, Any]()
+        for param in method.reserved_kwargs:
+            if param == _Method.SENDER_PARAM:
+                result[param] = msg.sender
+            elif param == _Method.FLAGS_PARAM:
+                result[param] = msg.flags
+
+        return result
+
     def _callback_method_handler(
         self,
         interface: ServiceInterface,
@@ -878,7 +891,8 @@ class BaseMessageBus:
     ) -> None:
         """This is the callback that will be called when a method call is."""
         args = ServiceInterface._c_msg_body_to_args(msg) if msg.unix_fds else msg.body
-        result = method.fn(interface, *args)
+        kwargs = self._get_kwargs_for_method_call(method, msg)
+        result = method.fn(interface, *args, **kwargs)
         if send_reply is BLOCK_UNEXPECTED_REPLY or _expects_reply(msg) is False:
             return
         body_fds = ServiceInterface._c_fn_result_to_body(
